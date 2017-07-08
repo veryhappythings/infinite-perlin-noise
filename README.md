@@ -1,5 +1,7 @@
 # Perlin Noise Experiments
 
+This is a repo imported from [Glitch.com](https://www.glitch.com). You can see this code in action at [https://mac-phaser-perlin.glitch.me](https://mac-phaser-perlin.glitch.me)
+
 Here's an example of infinite perlin noise generation, using Phaser JS to display it.
 
 This uses the improved perlin noise algorithm. The code is largely copied from the sources linked below and tweaked to get it working in JS. All credit to the authors of those posts!
