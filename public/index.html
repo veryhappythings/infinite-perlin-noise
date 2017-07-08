@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Perlin Noise</title>
+    <meta name="description" content="Perlin Noise">
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="initial-scale=1 maximum-scale=1 user-scalable=0 minimal-ui" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/2.6.2/phaser.min.js" type="text/javascript"></script>
+    <script src="/perlin.js" type="text/javascript"></script>
+ </head>
+<body>
+  <div id="phaser-perlin"></div>
+
+  <script type="text/javascript">
+    var game = new Phaser.Game(
+      800, 600, 
+      Phaser.AUTO, 
+      'phaser-perlin', 
+      { preload: preload, create: create, update: update, render: render }
+    );
+    
+    function preload() {
+      game.time.advancedTiming = true;
+    }
+    
+    function create() {
+      // Game setup
+      game.physics.startSystem(Phaser.Physics.ARCADE);
+      game.world.setBounds(0, 0);
+      
+      // HUD
+      hudCoords = new Phaser.Text(game, 20, game.height - 40, 'Coords', {fill: 'white'});
+      hudCoords.fixedToCamera = true;
+      game.add.existing(hudCoords);
+      
+      // Input
+      keys = game.input.keyboard.addKeys({
+        'up': Phaser.KeyCode.UP, 
+        'down': Phaser.KeyCode.DOWN, 
+        'left': Phaser.KeyCode.LEFT, 
+        'right': Phaser.KeyCode.RIGHT,
+        'chunk_info': Phaser.KeyCode.C,
+      });
+      prevX = 0;
+      prevY = 0;
+      
+      // Configurable options
+      sampleRate = 64; // Lower is more detailed noise
+      gridDistance = 512;
+      showGrid = false;
+      showVectors = false;
+
+      perlin = new PerlinNoise2D();
+      
+      // On-the-fly chunk generation
+      chunks = game.add.group();
+      for (var i = 0; i < 192; i ++) {
+        game.add.graphics(0, 0, chunks);
+      }
+      chunks.callAll('kill');
+
+      activeChunks = {};
+      var requiredChunks = getRequiredChunks();
+      requiredChunks.forEach(function(item, index, array) {
+        buildChunk(item[0], item[1]);
+      });
+    }
+    
+    function handleChunks() {
+      var requiredChunks = getRequiredChunks();
+      var activeChunksKeys = Object.keys(activeChunks);
+      console.log(activeChunksKeys);
+      var requiredChunksStrings = [];
+      
+      // For each required chunk, if it's not active, make it
+      requiredChunks.forEach(function(item, index, array) {
+        requiredChunksStrings.push(item.toString());
+        if (!activeChunksKeys.includes(item.toString())) {
+          buildChunk(item[0], item[1]);
+        }
+      });
+      
+      // For each active chunk, if it isn't required, bin it
+      var toDelete = [];
+      for (var [key, value] of Object.entries(activeChunks)) {
+        if (!requiredChunksStrings.includes(key)) {
+          console.log("Killing " + key);
+          value.clear();
+          value.kill();
+          toDelete.push(key);
+        }
+      }
+      for (var key of toDelete) {
+        delete activeChunks[key];
+      }
+    }
+    
+    function getRequiredChunks() {
+      var centreX = game.camera.x + game.width / 2;
+      var centreY = game.camera.y + game.height / 2;
+      
+      var chunksNeededAcross = Math.ceil(game.width * 4 / gridDistance);
+      var chunksNeededDown = Math.ceil(game.height * 4 / gridDistance);
+      console.log("Chunks needed: " + chunksNeededAcross + " / " + chunksNeededDown);
+      
+      var centralChunk = chunkForPoint(centreX, centreY);
+      var topLeftChunk = [
+        centralChunk[0] - Math.floor(chunksNeededAcross / 2), 
+        centralChunk[1] - Math.floor(chunksNeededDown / 2)
+      ]
+      var bottomRightChunk = [
+        centralChunk[0] + Math.ceil(chunksNeededAcross / 2), 
+        centralChunk[1] + Math.ceil(chunksNeededDown / 2)
+      ]
+      
+      var requiredChunks = [];
+      for (var x = topLeftChunk[0]; x < bottomRightChunk[0]; x++) {
+        for (var y = topLeftChunk[1]; y < bottomRightChunk[1]; y++) {
+          requiredChunks.push([x * gridDistance, y * gridDistance]);
+        }
+      }
+      return requiredChunks;
+    }
+    
+    function chunkForPoint(x, y) {
+      return [Math.floor(x / gridDistance), Math.floor(y / gridDistance)]
+    }
+    
+    // Grab a dead chunk from the pool and turn it into a new one
+    function buildChunk(worldX, worldY) {
+      console.log('Building ' + [worldX, worldY]);
+      chunk = chunks.getFirstExists(false);
+      chunk.reset(worldX, worldY);
+      for (var x = 0; x < gridDistance; x += sampleRate) {
+        for (var y = 0; y < gridDistance; y += sampleRate) {
+          var realX = x + (worldX);
+          var realY = y + (worldY);
+          var noise = perlin.perlin(realX / gridDistance, realY / gridDistance);
+          chunk.lineStyle(0, 0x00eeff, noise);
+          chunk.beginFill(0x00eeff, noise);
+          chunk.drawRect(x, y, sampleRate, sampleRate);
+          chunk.endFill();
+        }
+      }
+      if (showGrid) {
+        chunk.lineStyle(1, 0x00ff00, 1);
+        chunk.drawRect(0, 0, gridDistance, gridDistance);
+      }
+      if (showVectors) {
+        var chunkCoOrd = chunkForPoint(worldX, worldY);
+        var grad = perlin.gradientVectorForPoint(chunkCoOrd[0], chunkCoOrd[1]);
+        console.log("Grad " + grad + " for " + [worldX, worldY]);
+        drawLine(
+          chunk, 
+          0, 
+          0, 
+          grad[0] * (gridDistance / 2), 
+          grad[1] * (gridDistance / 2)
+        );
+      }
+      activeChunks[[worldX, worldY].toString()] = chunk;
+    }
+    
+    // Utility function to draw a line on a graphics object
+    function drawLine(graphics, x1, y1, x2, y2) {
+      graphics.lineStyle(1, 0x0000ff, 1);
+      graphics.moveTo(x1, y1);
+      graphics.lineTo(x2, y2);
+    }
+    
+    // Log a load of data about the state of the game
+    function chunkInfo() {
+      numChunksVertical = (game.height * 2) / gridDistance;
+      numChunksHorizontal = (game.width * 2) / gridDistance;
+      total_num_chunks =  numChunksVertical * numChunksHorizontal;
+      calcs_per_chunk = (gridDistance / sampleRate)**2;
+      console.log("camera position: (" + game.camera.x + "," + game.camera.y + ")");
+      console.log("screen size: (" + game.width + "," + game.height + ")");
+      console.log("Chunk size: " + gridDistance);
+      console.log("Sample rate: " + sampleRate);
+      console.log("Number of chunks required to cover screen height * 2: " + numChunksVertical);
+      console.log("Number of chunks required to cover screen width * 2: " + numChunksHorizontal);
+      console.log("Number of chunks required total: " + numChunksVertical * numChunksHorizontal);
+      console.log("Calculations per chunk: " + calcs_per_chunk);
+      console.log("Required chunks for screen:");
+      console.log(getRequiredChunks());
+    }
+  
+    function update() {
+      // Movement
+      if (keys.left.isDown) {
+        game.camera.x -= 10;
+      }
+      if (keys.right.isDown) {
+        game.camera.x += 10;
+      }
+      if (keys.up.isDown) {
+        game.camera.y -= 10;
+      }
+      if (keys.down.isDown) {
+        game.camera.y += 10;
+      }
+      
+      // If we've crossed a chunk border, recalculate chunks
+      var chunk = chunkForPoint(game.camera.x, game.camera.y);
+      if (chunk[0] != prevX || chunk[1] != prevY) {
+        handleChunks();
+      }
+      prevX = chunk[0];
+      prevY = chunk[1];
+
+      // Debug info
+      if (keys.chunk_info.downDuration(10)) {
+        chunkInfo();
+      }
+
+      // Update HUD
+      hudCoords.text = '(' + game.camera.x + ', ' + game.camera.y + ')';
+      
+      // Infinite world
+      game.world.setBounds(game.camera.x - game.width, game.camera.y - game.height, game.width*3, game.height*3);
+
+    }
+    
+    function render() {
+      game.debug.text(game.time.fps || '--', 2, 14, "#00ff00");
+    }
+  </script>
+  
+  <div>
+    <ul>
+      <li>C: Log chunk info</li>
+      <li>Arrow keys: Move camera</li>
+      <li><a href="https://glitch.com/~mac-phaser-perlin">Remix this in Glitch</a></li>
+    </ul>
+  </div>
+  </body>
+</html>
